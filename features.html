@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMMA-STRAT — Selected Features</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="shared.css" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>EMMA-STRAT Results Browser</h1>
+  <p>Interactive model performance explorer for endometrial cancer molecular subtyping</p>
+</header>
+
+<nav class="page-nav">
+  <a href="index.html">Model Performance</a>
+  <a href="flexynesis.html">Flexynesis</a>
+  <a href="features.html" class="active">Selected Features</a>
+  <a href="shap.html">SHAP Importance</a>
+</nav>
+
+<div class="page-body">
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-sm-4 col-md-2">
+        <label for="sfTask">Task</label>
+        <select class="form-select form-select-sm" id="sfTask">
+          <option value="">— select —</option>
+          <option value="ic">Genomic Subtype</option>
+          <option value="msi">MSI Status</option>
+        </select>
+      </div>
+      <div class="col-6 col-sm-4 col-md-2">
+        <label for="sfMethod">FS Method</label>
+        <select class="form-select form-select-sm" id="sfMethod">
+          <option value="">— select —</option>
+          <option value="ANOVA">ANOVA</option>
+          <option value="RFELASSO">LASSO</option>
+          <option value="RFERF">Random Forest</option>
+          <option value="RFESVM">SVM</option>
+        </select>
+      </div>
+      <div class="col-6 col-sm-4 col-md-2">
+        <label for="sfN">N Features</label>
+        <select class="form-select form-select-sm" id="sfN">
+          <option value="">— select —</option>
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="150">150</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div class="col-6 col-sm-4 col-md-3 d-flex gap-2 align-items-end">
+        <button class="btn btn-sm btn-outline-secondary" id="sfBtnReset">Reset</button>
+        <button class="btn btn-sm btn-primary" id="sfBtnDownloadAll" style="display:none">
+          ⬇ Download All (CSV)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt -->
+  <div id="sfPrompt" class="placeholder-tab" style="padding:3rem 1rem">
+    <div class="ph-icon">🧬</div>
+    <h4>Select Task, FS Method &amp; N Features</h4>
+    <p>Choose all three filters above to display the selected feature lists.</p>
+  </div>
+
+  <!-- Loading -->
+  <div id="sfLoading" style="display:none;text-align:center;padding:2rem">
+    <div class="spinner-border spinner-border-sm" role="status" style="color:var(--teal)"></div>
+    <span class="ms-2 text-muted">Loading feature lists…</span>
+  </div>
+
+  <!-- Error -->
+  <div id="sfError" class="alert alert-danger" style="display:none"></div>
+
+  <!-- Three-column display -->
+  <div id="sfColumns" style="display:none">
+    <div class="row g-3">
+
+      <!-- miRNA -->
+      <div class="col-12 col-md-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="section-title mb-0">
+            miRNA Expression
+            <span class="badge rounded-pill ms-1"
+                  style="background:var(--hi-mirna);color:#7a1030;font-size:0.7rem"
+                  id="sfCountMirna">0</span>
+          </span>
+          <button class="btn btn-outline-secondary btn-sm" id="sfDlMirna" style="font-size:0.75rem">⬇ CSV</button>
+        </div>
+        <div style="border:1px solid #d0dde8;border-radius:6px;max-height:480px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0" style="font-size:0.8rem">
+            <thead style="position:sticky;top:0;background:var(--navy);color:#fff">
+              <tr><th style="padding:0.4rem 0.6rem">#</th><th style="padding:0.4rem 0.6rem">Feature</th></tr>
+            </thead>
+            <tbody id="sfBodyMirna"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- RNA -->
+      <div class="col-12 col-md-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="section-title mb-0">
+            RNA Expression
+            <span class="badge rounded-pill ms-1"
+                  style="background:var(--hi-rna);color:#6b4800;font-size:0.7rem"
+                  id="sfCountRna">0</span>
+          </span>
+          <button class="btn btn-outline-secondary btn-sm" id="sfDlRna" style="font-size:0.75rem">⬇ CSV</button>
+        </div>
+        <div style="border:1px solid #d0dde8;border-radius:6px;max-height:480px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0" style="font-size:0.8rem">
+            <thead style="position:sticky;top:0;background:var(--navy);color:#fff">
+              <tr><th style="padding:0.4rem 0.6rem">#</th><th style="padding:0.4rem 0.6rem">Feature</th></tr>
+            </thead>
+            <tbody id="sfBodyRna"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Methylation -->
+      <div class="col-12 col-md-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="section-title mb-0">
+            DNA Methylation
+            <span class="badge rounded-pill ms-1"
+                  style="background:var(--hi-methyl);color:#4a1a6e;font-size:0.7rem"
+                  id="sfCountMethyl">0</span>
+          </span>
+          <button class="btn btn-outline-secondary btn-sm" id="sfDlMethyl" style="font-size:0.75rem">⬇ CSV</button>
+        </div>
+        <div style="border:1px solid #d0dde8;border-radius:6px;max-height:480px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0" style="font-size:0.8rem">
+            <thead style="position:sticky;top:0;background:var(--navy);color:#fff">
+              <tr><th style="padding:0.4rem 0.6rem">#</th><th style="padding:0.4rem 0.6rem">Feature</th></tr>
+            </thead>
+            <tbody id="sfBodyMethyl"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- /page-body -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+'use strict';
+
+const sfData = { mirnas: [], rna: [], methyl: [] };
+
+const sfGet = id => document.getElementById(id);
+const sfVal = id => sfGet(id).value;
+
+['sfTask','sfMethod','sfN'].forEach(id => sfGet(id).addEventListener('change', sfMaybeLoad));
+sfGet('sfBtnReset').addEventListener('click', () => {
+  ['sfTask','sfMethod','sfN'].forEach(id => { sfGet(id).value = ''; });
+  sfShowPrompt();
+});
+sfGet('sfDlMirna') .addEventListener('click', () => sfDownload('mirnas'));
+sfGet('sfDlRna')   .addEventListener('click', () => sfDownload('rna'));
+sfGet('sfDlMethyl').addEventListener('click', () => sfDownload('methyl'));
+sfGet('sfBtnDownloadAll').addEventListener('click', sfDownloadAll);
+
+function sfMaybeLoad() {
+  const task = sfVal('sfTask'), method = sfVal('sfMethod'), n = sfVal('sfN');
+  if (!task || !method || !n) { sfShowPrompt(); return; }
+  sfLoad(task, method, n);
+}
+
+function sfShowPrompt() {
+  sfGet('sfPrompt').style.display  = '';
+  sfGet('sfLoading').style.display = 'none';
+  sfGet('sfError').style.display   = 'none';
+  sfGet('sfColumns').style.display = 'none';
+  sfGet('sfBtnDownloadAll').style.display = 'none';
+}
+
+async function sfLoad(task, method, n) {
+  sfGet('sfPrompt').style.display  = 'none';
+  sfGet('sfError').style.display   = 'none';
+  sfGet('sfColumns').style.display = 'none';
+  sfGet('sfBtnDownloadAll').style.display = 'none';
+  sfGet('sfLoading').style.display = '';
+
+  const omicsList = ['mirnas','rna','methyl'];
+  const errors = [];
+
+  await Promise.all(omicsList.map(async omics => {
+    const path = `./data/selected_features/${method}_${task}/selected_${omics}_${method}_${n}.txt`;
+    try {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      sfData[omics] = (await r.text()).split('\n').map(l => l.trim()).filter(Boolean);
+    } catch(e) {
+      sfData[omics] = [];
+      errors.push(`${omics}: ${e.message}`);
+    }
+  }));
+
+  sfGet('sfLoading').style.display = 'none';
+
+  if (errors.length === omicsList.length) {
+    sfGet('sfError').style.display = '';
+    sfGet('sfError').textContent   = `Could not load feature files: ${errors.join('; ')}`;
+    return;
+  }
+
+  [
+    { key: 'mirnas', bodyId: 'sfBodyMirna',  countId: 'sfCountMirna'  },
+    { key: 'rna',    bodyId: 'sfBodyRna',     countId: 'sfCountRna'    },
+    { key: 'methyl', bodyId: 'sfBodyMethyl',  countId: 'sfCountMethyl' },
+  ].forEach(({ key, bodyId, countId }) => {
+    const features = sfData[key];
+    sfGet(countId).textContent = features.length;
+    sfGet(bodyId).innerHTML = features.length === 0
+      ? '<tr><td colspan="2" class="text-muted" style="padding:0.5rem 0.6rem">No data found</td></tr>'
+      : features.map((f, i) =>
+          `<tr><td style="padding:0.3rem 0.6rem;color:#888;width:36px">${i+1}</td>
+               <td style="padding:0.3rem 0.6rem;font-family:monospace">${f}</td></tr>`
+        ).join('');
+  });
+
+  sfGet('sfColumns').style.display = '';
+  sfGet('sfBtnDownloadAll').style.display = '';
+}
+
+function sfDownload(omics) {
+  const features = sfData[omics];
+  if (!features.length) return;
+  sfTriggerDownload('feature\n' + features.join('\n'),
+    `features_${omics}_${sfVal('sfMethod')}_${sfVal('sfTask')}_${sfVal('sfN')}.csv`);
+}
+
+function sfDownloadAll() {
+  const cols = [sfData.mirnas, sfData.rna, sfData.methyl];
+  const maxLen = Math.max(...cols.map(c => c.length));
+  const rows = Array.from({ length: maxLen }, (_, i) => cols.map(c => c[i] ?? '').join(','));
+  sfTriggerDownload(['miRNA Expression,RNA Expression,DNA Methylation', ...rows].join('\n'),
+    `features_all_${sfVal('sfMethod')}_${sfVal('sfTask')}_${sfVal('sfN')}.csv`);
+}
+
+function sfTriggerDownload(content, filename) {
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([content], { type: 'text/csv' })),
+    download: filename,
+  });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>

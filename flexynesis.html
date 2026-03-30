@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMMA-STRAT — Flexynesis Benchmarking</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator.min.css" rel="stylesheet">
+  <link href="shared.css" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>EMMA-STRAT Results Browser</h1>
+  <p>Interactive model performance explorer for endometrial cancer molecular subtyping</p>
+</header>
+
+<nav class="page-nav">
+  <a href="index.html">Model Performance</a>
+  <a href="flexynesis.html" class="active">Flexynesis</a>
+  <a href="features.html">Selected Features</a>
+  <a href="shap.html">SHAP Importance</a>
+</nav>
+
+<div class="page-body">
+
+  <!-- Loading -->
+  <div id="flxLoading" class="loading-center">
+    <div class="spinner-border" role="status" style="width:3rem;height:3rem;color:var(--teal)">
+      <span class="visually-hidden">Loading…</span>
+    </div>
+    <p class="mt-3 text-muted">Loading Flexynesis data…</p>
+  </div>
+
+  <!-- Error -->
+  <div id="flxError" class="alert alert-danger" style="display:none">
+    Could not load <code>data/flexynesis.json</code>.
+    <span id="flxErrorDetail"></span>
+  </div>
+
+  <div id="flxMain" style="display:none">
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <div class="row g-2 align-items-end">
+        <div class="col-6 col-sm-4 col-md-3">
+          <label for="flxTask">Task</label>
+          <select class="form-select form-select-sm" id="flxTask">
+            <option value="">All tasks</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <button class="btn btn-sm btn-outline-secondary w-100" id="flxBtnReset">Reset Filter</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="tabulator-outer"><div id="flxTable"></div></div>
+
+    <!-- Chart section -->
+    <div class="chart-section" id="flxChartSection">
+      <hr class="my-3">
+      <div class="row g-3">
+        <div class="col-12 col-lg-7">
+          <div class="section-title" id="flxChartTitle">Performance Chart</div>
+          <div class="chart-wrap"><canvas id="flxPerfChart"></canvas></div>
+        </div>
+        <div class="col-12 col-lg-5">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="section-title mb-0">Confusion Matrix</div>
+            <div class="cm-btn-group btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-primary active" id="flxBtnCmInternal" onclick="flxSwitchCM('internal')">Internal</button>
+              <button type="button" class="btn btn-outline-primary" id="flxBtnCmSet2" onclick="flxSwitchCM('set2')">Set-2</button>
+              <button type="button" class="btn btn-outline-primary" id="flxBtnCmSet3" onclick="flxSwitchCM('set3')">Set-3</button>
+            </div>
+          </div>
+          <div class="cm-wrap"><canvas id="flxCmCanvas"></canvas></div>
+          <div id="flxCmNote" class="text-muted mt-1" style="font-size:0.75rem"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /flxMain -->
+</div><!-- /page-body -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+<script src="shared.js"></script>
+<script>
+'use strict';
+
+let flxAllRows    = [];
+let flxTbl        = null;
+let flxPerfChart  = null;
+let flxSelectedId = null;
+let flxActiveCmRow = null;
+let flxActiveCmSet = 'internal';
+
+document.addEventListener('DOMContentLoaded', () => {
+  fetch('./data/flexynesis.json')
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => {
+      hide('flxLoading');
+      show('flxMain');
+      flxBuild(data);
+    })
+    .catch(err => {
+      hide('flxLoading');
+      document.getElementById('flxErrorDetail').textContent = String(err);
+      show('flxError');
+    });
+});
+
+function flxBuild(data) {
+  const meta    = data.metadata || {};
+  const results = data.results  || [];
+  let id = 0;
+
+  results.forEach(r => {
+    Object.entries(meta.tasks || {}).forEach(([taskKey, taskLabel]) => {
+      const sg = (s, m) => r.sets?.[s]?.[taskKey]?.[m] ?? null;
+      const s2_ba  = sg('set2','balanced_acc'), s3_ba  = sg('set3','balanced_acc');
+      const s2_f1  = sg('set2','macro_f1'),     s3_f1  = sg('set3','macro_f1');
+      const s2_auc = sg('set2','macro_auc'),    s3_auc = sg('set3','macro_auc');
+      flxAllRows.push({
+        _id: id++,
+        method: r.method, method_label: r.method_label || r.method,
+        task: taskKey,    task_label: taskLabel,
+        _int_ba: sg('internal','balanced_acc'), _s2_ba: s2_ba, _s3_ba: s3_ba, _avg_ext: avg2(s2_ba, s3_ba),
+        _int_f1: sg('internal','macro_f1'),     _s2_f1: s2_f1, _s3_f1: s3_f1, _avg_ext_f1: avg2(s2_f1, s3_f1),
+        _int_auc: sg('internal','macro_auc'),   _s2_auc: s2_auc, _s3_auc: s3_auc, _avg_ext_auc: avg2(s2_auc, s3_auc),
+        _sets: r.sets,
+      });
+    });
+  });
+
+  const fTask = document.getElementById('flxTask');
+  Object.entries(meta.tasks || {}).forEach(([k, v]) => { fTask.innerHTML += `<option value="${k}">${v}</option>`; });
+  fTask.addEventListener('change', flxApplyFilter);
+  document.getElementById('flxBtnReset').addEventListener('click', () => { fTask.value = ''; flxApplyFilter(); });
+
+  flxInitTable(flxAllRows);
+}
+
+function flxApplyFilter() {
+  const task = document.getElementById('flxTask').value;
+  flxTbl.setData(flxAllRows.filter(r => !task || r.task === task));
+  flxCollapseCharts();
+}
+
+function flxInitTable(rows) {
+  flxTbl = new Tabulator('#flxTable', {
+    data: rows,
+    layout: 'fitData',
+    responsiveLayout: 'collapse',
+    pagination: 'local',
+    paginationSize: 20,
+    initialSort: [{ column: '_avg_ext_f1', dir: 'desc' }, { column: '_int_f1', dir: 'desc' }],
+    rowFormatter(row) {
+      const d = row.getData(), el = row.getElement();
+      el.classList.toggle('sel-row', d._id === flxSelectedId);
+    },
+    columns: [
+      { title: 'Method', field: 'method_label', sorter: 'string', width: 240, formatter: c => `<span style="font-weight:600">${c.getValue()??'—'}</span>` },
+      { title: 'Task',   field: 'task_label',   sorter: 'string', width: 150 },
+      { title: 'Int. Bal.Acc',       field: '_int_ba',      sorter: 'num3dp', hozAlign: 'right', width: 112, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. Bal.Acc ▲', field: '_avg_ext',     sorter: 'num3dp', hozAlign: 'right', width: 130, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_ba,d._s3_ba); } },
+      { title: 'Int. Macro F1',      field: '_int_f1',      sorter: 'num3dp', hozAlign: 'right', width: 112, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. F1',        field: '_avg_ext_f1',  sorter: 'num3dp', hozAlign: 'right', width: 120, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_f1,d._s3_f1); } },
+      { title: 'Int. AUC',           field: '_int_auc',     sorter: 'num3dp', hozAlign: 'right', width: 100, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. AUC',       field: '_avg_ext_auc', sorter: 'num3dp', hozAlign: 'right', width: 120, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_auc,d._s3_auc); } },
+    ],
+    rowClick(e, row) {
+      const d = row.getData();
+      flxSelectedId = d._id; flxActiveCmSet = 'internal';
+      flxTbl.redraw();
+      flxShowCharts(d);
+    },
+  });
+}
+
+function flxCollapseCharts() {
+  document.getElementById('flxChartSection').classList.remove('visible');
+  flxSelectedId = null;
+  if (flxPerfChart) { flxPerfChart.destroy(); flxPerfChart = null; }
+}
+
+function flxShowCharts(rowData) {
+  document.getElementById('flxChartSection').classList.add('visible');
+  document.getElementById('flxChartTitle').textContent = `${rowData.method_label}  ·  ${rowData.task_label}`;
+
+  if (flxPerfChart) { flxPerfChart.destroy(); flxPerfChart = null; }
+  const sets = ['internal','set2','set3'], tk = rowData.task;
+  flxPerfChart = drawBarChart('flxPerfChart',
+    sets.map(s => rowData._sets?.[s]?.[tk]?.balanced_acc ?? null),
+    sets.map(s => rowData._sets?.[s]?.[tk]?.macro_auc    ?? null),
+    sets.map(s => rowData._sets?.[s]?.[tk]?.macro_f1     ?? null)
+  );
+
+  flxActiveCmRow = rowData; flxActiveCmSet = 'internal';
+  flxSwitchCM('internal');
+  setTimeout(() => document.getElementById('flxChartSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+}
+
+function flxSwitchCM(setKey) {
+  flxActiveCmSet = setKey;
+  const btnMap = { internal: 'flxBtnCmInternal', set2: 'flxBtnCmSet2', set3: 'flxBtnCmSet3' };
+  Object.entries(btnMap).forEach(([k, id]) => document.getElementById(id)?.classList.toggle('active', k === setKey));
+  if (!flxActiveCmRow) return;
+  const tk = flxActiveCmRow.task;
+  drawCM('flxCmCanvas', 'flxCmNote', flxActiveCmRow._sets?.[setKey]?.[tk]?.confusion_matrix, setKey);
+}
+
+let _resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    if (flxActiveCmRow) {
+      const tk = flxActiveCmRow.task;
+      drawCM('flxCmCanvas', 'flxCmNote', flxActiveCmRow._sets?.[flxActiveCmSet]?.[tk]?.confusion_matrix, flxActiveCmSet);
+    }
+  }, 250);
+});
+</script>
+</body>
+</html>

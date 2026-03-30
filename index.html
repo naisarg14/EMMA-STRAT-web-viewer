@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMMA-STRAT — Model Performance Explorer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator.min.css" rel="stylesheet">
+  <link href="shared.css" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>EMMA-STRAT Results Browser</h1>
+  <p>Interactive model performance explorer for endometrial cancer molecular subtyping</p>
+</header>
+
+<nav class="page-nav">
+  <a href="index.html" class="active">Model Performance</a>
+  <a href="flexynesis.html">Flexynesis</a>
+  <a href="features.html">Selected Features</a>
+  <a href="shap.html">SHAP Importance</a>
+</nav>
+
+<div class="page-body">
+
+  <!-- Loading -->
+  <div id="loadingSpinner" class="loading-center">
+    <div class="spinner-border" role="status" style="width:3rem;height:3rem;color:var(--teal)">
+      <span class="visually-hidden">Loading…</span>
+    </div>
+    <p class="mt-3 text-muted">Loading results data…</p>
+  </div>
+
+  <!-- Error -->
+  <div id="errorBanner" class="alert alert-danger" style="display:none">
+    <strong>Could not load data.</strong>
+    Make sure <code>data/results_viewer_data.json</code> exists.
+    <br><small id="errorDetail" class="text-muted"></small>
+  </div>
+
+  <div id="mainContent" style="display:none">
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <div class="row g-2 align-items-end">
+        <div class="col-6 col-sm-4 col-md-2">
+          <label for="fTask">Task</label>
+          <select class="form-select form-select-sm" id="fTask">
+            <option value="">All tasks</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <label for="fOmics">Omics Type</label>
+          <select class="form-select form-select-sm" id="fOmics">
+            <option value="">All omics</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <label for="fModel">Model</label>
+          <select class="form-select form-select-sm" id="fModel">
+            <option value="">All models</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <label for="fFS">Feature Selection</label>
+          <select class="form-select form-select-sm" id="fFS">
+            <option value="">All FS methods</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <label for="fNFeat">N Features</label>
+          <select class="form-select form-select-sm" id="fNFeat">
+            <option value="">All</option>
+          </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
+          <button class="btn btn-sm btn-outline-secondary w-100" id="btnReset">Reset Filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="mb-2 d-flex flex-wrap align-items-center gap-1" style="font-size:0.75rem;color:#555">
+      <strong class="me-1" style="color:var(--navy)">Best internal F1 per task &amp; omics:</strong>
+      <span class="legend-pill"><span class="swatch" style="background:var(--hi-multi);border:1px solid #9ec9a7"></span>Multi-Omics</span>
+      <span class="legend-pill"><span class="swatch" style="background:var(--hi-rna);border:1px solid #d4a800"></span>RNA Expression</span>
+      <span class="legend-pill"><span class="swatch" style="background:var(--hi-methyl);border:1px solid #b07dd4"></span>DNA Methylation</span>
+      <span class="legend-pill"><span class="swatch" style="background:var(--hi-mirna);border:1px solid #e88fa8"></span>miRNA Expression</span>
+      <span class="legend-pill ms-2"><span class="swatch" style="background:var(--blue-sel);border:1px solid #7db8e6"></span>Selected row</span>
+    </div>
+
+    <!-- Table -->
+    <div class="tabulator-outer"><div id="resultsTable"></div></div>
+
+    <!-- Chart section -->
+    <div class="chart-section" id="chartSection">
+      <hr class="my-3">
+      <div class="row g-3">
+        <div class="col-12 col-lg-7">
+          <div class="section-title" id="chartTitle">Performance Chart</div>
+          <div class="chart-wrap"><canvas id="perfChart"></canvas></div>
+        </div>
+        <div class="col-12 col-lg-5">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="section-title mb-0">Confusion Matrix</div>
+            <div class="cm-btn-group btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-primary active" id="btnCmInternal" onclick="switchCM('internal')">Internal</button>
+              <button type="button" class="btn btn-outline-primary" id="btnCmSet2" onclick="switchCM('set2')">Set-2</button>
+              <button type="button" class="btn btn-outline-primary" id="btnCmSet3" onclick="switchCM('set3')">Set-3</button>
+            </div>
+          </div>
+          <div class="cm-wrap"><canvas id="cmCanvas"></canvas></div>
+          <div id="cmNote" class="text-muted mt-1" style="font-size:0.75rem"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /mainContent -->
+</div><!-- /page-body -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+<script src="shared.js"></script>
+<script>
+'use strict';
+
+let allResults   = [];
+let metadata     = {};
+let tabulatorTbl = null;
+let perfChartJs  = null;
+let bestRowMap   = new Map();
+let selectedId   = null;
+let activeCmSet  = 'internal';
+let activeCmRow  = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  fetch('./data/results_viewer_data.json')
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => {
+      metadata   = data.metadata || {};
+      allResults = (data.results || []).map((r, i) => Object.assign({ _id: i }, r));
+      hide('loadingSpinner');
+      show('mainContent');
+      buildFilters();
+      initTable();
+    })
+    .catch(err => {
+      hide('loadingSpinner');
+      document.getElementById('errorDetail').textContent = String(err);
+      show('errorBanner');
+    });
+});
+
+function enrichRow(r) {
+  const s2_ba  = safeGet(r, 'set2', 'balanced_acc');
+  const s3_ba  = safeGet(r, 'set3', 'balanced_acc');
+  const s2_f1  = safeGet(r, 'set2', 'macro_f1');
+  const s3_f1  = safeGet(r, 'set3', 'macro_f1');
+  const s2_auc = safeGet(r, 'set2', 'macro_auc');
+  const s3_auc = safeGet(r, 'set3', 'macro_auc');
+  return Object.assign({}, r, {
+    _int_ba: safeGet(r, 'internal', 'balanced_acc'),
+    _s2_ba: s2_ba, _s3_ba: s3_ba, _avg_ext: avg2(s2_ba, s3_ba),
+    _int_f1: safeGet(r, 'internal', 'macro_f1'),
+    _s2_f1: s2_f1, _s3_f1: s3_f1, _avg_ext_f1: avg2(s2_f1, s3_f1),
+    _int_auc: safeGet(r, 'internal', 'macro_auc'),
+    _s2_auc: s2_auc, _s3_auc: s3_auc, _avg_ext_auc: avg2(s2_auc, s3_auc),
+  });
+}
+
+function computeBestRows(rows) {
+  const groups = {};
+  rows.forEach(r => {
+    const key = `${r.task}__${r.omics_type || '_unknown'}`;
+    if (!groups[key]) groups[key] = { omicsType: r.omics_type || '_unknown', items: [] };
+    groups[key].items.push(r);
+  });
+  const map = new Map();
+  Object.values(groups).forEach(({ omicsType, items }) => {
+    const best = items.reduce((b, r) => (r._int_f1 === null ? b : (!b || r._int_f1 > b._int_f1) ? r : b), null);
+    if (best) map.set(best._id, OMICS_CLASS[omicsType] || 'multi');
+  });
+  return map;
+}
+
+function buildFilters() {
+  const fTask = document.getElementById('fTask');
+  Object.entries(metadata.tasks || {}).forEach(([k, v]) => { fTask.innerHTML += `<option value="${k}">${v}</option>`; });
+
+  const fOmics = document.getElementById('fOmics');
+  const OMICS_KNOWN = [
+    { key: 'multi',  label: 'Multi-Omics'      },
+    { key: 'rna',    label: 'RNA Expression'    },
+    { key: 'methyl', label: 'DNA Methylation'   },
+    { key: 'mirnas', label: 'miRNA Expression'  },
+  ];
+  allResults.forEach(r => {
+    if (r.omics_type && r.omics_label) {
+      const e = OMICS_KNOWN.find(o => o.key === r.omics_type);
+      if (e) e.label = r.omics_label;
+    }
+  });
+  OMICS_KNOWN.forEach(({ key, label }) => { fOmics.innerHTML += `<option value="${key}">${label}</option>`; });
+
+  const fModel = document.getElementById('fModel');
+  Object.entries(metadata.models || {}).forEach(([k, v]) => { fModel.innerHTML += `<option value="${k}">${v}</option>`; });
+
+  const fFS = document.getElementById('fFS');
+  Object.entries(metadata.fs_methods || {}).forEach(([k, v]) => { fFS.innerHTML += `<option value="${k}">${v}</option>`; });
+
+  const fNFeat = document.getElementById('fNFeat');
+  (metadata.n_features || []).forEach(n => { fNFeat.innerHTML += `<option value="${n}">${n}</option>`; });
+
+  ['fTask','fOmics','fModel','fFS','fNFeat'].forEach(id => {
+    document.getElementById(id).addEventListener('change', applyFilters);
+  });
+  document.getElementById('btnReset').addEventListener('click', () => {
+    ['fTask','fOmics','fModel','fFS','fNFeat'].forEach(id => { document.getElementById(id).value = ''; });
+    applyFilters();
+  });
+}
+
+function getFiltered() {
+  const task  = document.getElementById('fTask').value;
+  const omics = document.getElementById('fOmics').value;
+  const model = document.getElementById('fModel').value;
+  const fs    = document.getElementById('fFS').value;
+  const nf    = document.getElementById('fNFeat').value;
+  return allResults.filter(r => {
+    if (task  && r.task !== task) return false;
+    if (omics && r.omics_type && r.omics_type !== omics) return false;
+    if (model && r.model !== model) return false;
+    if (fs    && r.fs_method !== fs) return false;
+    if (nf    && String(r.n_features) !== nf) return false;
+    return true;
+  });
+}
+
+function applyFilters() {
+  const rows = getFiltered().map(enrichRow);
+  bestRowMap = computeBestRows(rows);
+  tabulatorTbl.setData(rows);
+  collapseCharts();
+}
+
+function initTable() {
+  const rows = allResults.map(enrichRow);
+  bestRowMap = computeBestRows(rows);
+  tabulatorTbl = new Tabulator('#resultsTable', {
+    data: rows,
+    layout: 'fitData',
+    responsiveLayout: 'collapse',
+    pagination: 'local',
+    paginationSize: 20,
+    paginationSizeSelector: [10, 20, 50, 100, 200],
+    initialSort: [{ column: '_avg_ext_f1', dir: 'desc' }, { column: '_int_f1', dir: 'desc' }],
+    rowFormatter(row) {
+      const d = row.getData(), el = row.getElement();
+      el.classList.remove('best-multi','best-rna','best-methyl','best-mirna','sel-row');
+      const bc = bestRowMap.get(d._id);
+      if (bc) el.classList.add(`best-${bc}`);
+      if (d._id === selectedId) el.classList.add('sel-row');
+    },
+    columns: [
+      { title: 'Task',       field: 'task_label',  sorter: 'string', width: 135, formatter: c => `<span style="font-weight:600">${c.getValue()??'—'}</span>` },
+      { title: 'Omics Type', field: 'omics_label', sorter: 'string', width: 145, formatter: c => omicsBadge(c.getRow().getData().omics_type, c.getValue()) },
+      { title: 'Model',      field: 'model_label', sorter: 'string', width: 105 },
+      { title: 'FS Method',  field: 'fs_label',    sorter: 'string', width: 110 },
+      { title: 'N Feat.',    field: 'n_features',  sorter: 'number', hozAlign: 'center', width: 78 },
+      { title: 'Int. Bal.Acc',       field: '_int_ba',      sorter: 'num3dp', hozAlign: 'right', width: 112, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. Bal.Acc ▲', field: '_avg_ext',     sorter: 'num3dp', hozAlign: 'right', width: 130, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_ba,d._s3_ba); } },
+      { title: 'Int. Macro F1',      field: '_int_f1',      sorter: 'num3dp', hozAlign: 'right', width: 112, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. F1',        field: '_avg_ext_f1',  sorter: 'num3dp', hozAlign: 'right', width: 120, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_f1,d._s3_f1); } },
+      { title: 'Int. AUC',           field: '_int_auc',     sorter: 'num3dp', hozAlign: 'right', width: 100, formatter: c => fmtCell(c.getValue()) },
+      { title: 'Avg Ext. AUC',       field: '_avg_ext_auc', sorter: 'num3dp', hozAlign: 'right', width: 120, formatter: c => { const d=c.getRow().getData(); return fmtAvgExt(c.getValue(),d._s2_auc,d._s3_auc); } },
+    ],
+    rowClick(e, row) {
+      const d = row.getData();
+      selectedId = d._id; activeCmSet = 'internal';
+      tabulatorTbl.redraw();
+      showCharts(d);
+    },
+  });
+}
+
+function collapseCharts() {
+  document.getElementById('chartSection').classList.remove('visible');
+  selectedId = null;
+  if (perfChartJs) { perfChartJs.destroy(); perfChartJs = null; }
+}
+
+function showCharts(rowData) {
+  document.getElementById('chartSection').classList.add('visible');
+  const omicsPart = rowData.omics_label ? `  ·  ${rowData.omics_label}` : '';
+  document.getElementById('chartTitle').textContent =
+    `${rowData.model_label}  ·  ${rowData.fs_label}  ·  ${rowData.n_features} features  ·  ${rowData.task_label}${omicsPart}`;
+
+  if (perfChartJs) { perfChartJs.destroy(); perfChartJs = null; }
+  const sets = ['internal','set2','set3'];
+  perfChartJs = drawBarChart('perfChart',
+    sets.map(s => rowData.sets?.[s]?.balanced_acc ?? null),
+    sets.map(s => rowData.sets?.[s]?.macro_auc    ?? null),
+    sets.map(s => rowData.sets?.[s]?.macro_f1     ?? null)
+  );
+
+  activeCmRow = rowData; activeCmSet = 'internal';
+  switchCM('internal');
+  setTimeout(() => document.getElementById('chartSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+}
+
+function switchCM(setKey) {
+  activeCmSet = setKey;
+  ['Internal','Set2','Set3'].forEach(s => {
+    const btn = document.getElementById(`btnCm${s}`);
+    if (btn) btn.classList.toggle('active', (s === 'Internal' ? 'internal' : s.toLowerCase()) === setKey);
+  });
+  if (!activeCmRow) return;
+  drawCM('cmCanvas', 'cmNote', activeCmRow.sets?.[setKey]?.confusion_matrix, setKey);
+}
+
+let _resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    if (activeCmRow) drawCM('cmCanvas', 'cmNote', activeCmRow.sets?.[activeCmSet]?.confusion_matrix, activeCmSet);
+  }, 250);
+});
+</script>
+</body>
+</html>

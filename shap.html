@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMMA-STRAT — SHAP Feature Importance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator.min.css" rel="stylesheet">
+  <link href="shared.css" rel="stylesheet">
+  <style>
+    .task-toggle .btn { font-size: 0.88rem; padding: 0.4rem 1.4rem; }
+    .task-toggle .btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+
+    .model-info {
+      font-size: 0.8rem;
+      color: #555;
+      background: #f7fafc;
+      border: 1px solid #d8e4ec;
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      margin-bottom: 1rem;
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .model-info span { display: flex; align-items: center; gap: 5px; }
+    .model-info strong { color: var(--navy); }
+
+    /* Bar chart container */
+    .shap-bar-wrap { position: relative; height: 380px; margin-bottom: 1.5rem; }
+
+    /* Omics badge (inline in table) */
+    .ob { display:inline-block; padding:1px 6px; border-radius:8px; font-size:0.72rem; white-space:nowrap; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>EMMA-STRAT Results Browser</h1>
+  <p>Interactive model performance explorer for endometrial cancer molecular subtyping</p>
+</header>
+
+<nav class="page-nav">
+  <a href="index.html">Model Performance</a>
+  <a href="flexynesis.html">Flexynesis</a>
+  <a href="features.html">Selected Features</a>
+  <a href="shap.html" class="active">SHAP Importance</a>
+</nav>
+
+<div class="page-body">
+
+  <!-- Task toggle -->
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <span style="font-weight:600;color:var(--navy);font-size:0.9rem">Task:</span>
+    <div class="task-toggle btn-group" role="group">
+      <button type="button" class="btn btn-outline-secondary active" id="btnIC"  onclick="loadTask('ic')">Genomic Subtype</button>
+      <button type="button" class="btn btn-outline-secondary"        id="btnMSI" onclick="loadTask('msi')">MSI Status</button>
+    </div>
+  </div>
+
+  <!-- Model info bar -->
+  <div class="model-info" id="modelInfo"></div>
+
+  <!-- Loading -->
+  <div id="shapLoading" class="loading-center" style="display:none">
+    <div class="spinner-border spinner-border-sm" role="status" style="color:var(--teal)"></div>
+    <span class="ms-2 text-muted">Loading SHAP data…</span>
+  </div>
+
+  <!-- Error -->
+  <div id="shapError" class="alert alert-danger" style="display:none"></div>
+
+  <!-- Content -->
+  <div id="shapContent" style="display:none">
+
+    <!-- Top-features bar chart -->
+    <div class="section-title" id="shapChartTitle">Top 20 Features by Mean SHAP Importance</div>
+    <div class="shap-bar-wrap">
+      <canvas id="shapBarChart"></canvas>
+    </div>
+
+    <!-- Omics legend -->
+    <div class="mb-2 d-flex flex-wrap gap-2" style="font-size:0.75rem">
+      <span style="color:#555;font-weight:600;margin-right:4px">Omics:</span>
+      <span class="ob" style="background:var(--hi-rna);border:1px solid #d4a800;color:#6b4800">(R) RNA Expression</span>
+      <span class="ob" style="background:var(--hi-methyl);border:1px solid #b07dd4;color:#4a1a6e">(D) DNA Methylation</span>
+      <span class="ob" style="background:var(--hi-mirna);border:1px solid #e88fa8;color:#7a1030">(M) miRNA Expression</span>
+    </div>
+
+    <!-- Table -->
+    <div class="tabulator-outer"><div id="shapTable"></div></div>
+
+  </div>
+
+</div><!-- /page-body -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+<script src="shared.js"></script>
+<script>
+'use strict';
+
+const TASK_META = {
+  ic: {
+    file:    './data/shap_ic.csv',
+    label:   'Genomic Subtype (IC)',
+    model:   'MLP',
+    fs:      'LASSO',
+    nFeat:   50,
+    classes: ['CNV_HIGH', 'CNV_LOW', 'MSI', 'POLE'],
+  },
+  msi: {
+    file:    './data/shap_msi.csv',
+    label:   'MSI Status',
+    model:   'LightGBM',
+    fs:      'SVM',
+    nFeat:   20,
+    classes: [],   // binary — only mean_importance
+  },
+};
+
+const OMICS_CODE = {
+  R: { label: 'RNA',        bg: 'var(--hi-rna)',    border: '#d4a800', color: '#6b4800' },
+  D: { label: 'Methylation',bg: 'var(--hi-methyl)', border: '#b07dd4', color: '#4a1a6e' },
+  M: { label: 'miRNA',      bg: 'var(--hi-mirna)',  border: '#e88fa8', color: '#7a1030' },
+};
+
+let shapTbl   = null;
+let shapChart = null;
+let activeTask = 'ic';
+
+// Load IC on page open
+document.addEventListener('DOMContentLoaded', () => loadTask('ic'));
+
+function loadTask(task) {
+  activeTask = task;
+
+  // Toggle buttons
+  document.getElementById('btnIC') .classList.toggle('active', task === 'ic');
+  document.getElementById('btnMSI').classList.toggle('active', task === 'msi');
+
+  const meta = TASK_META[task];
+
+  // Model info bar
+  document.getElementById('modelInfo').innerHTML = [
+    `<span>📋 <strong>Task:</strong> ${meta.label}</span>`,
+    `<span>🤖 <strong>Model:</strong> ${meta.model}</span>`,
+    `<span>🔬 <strong>Feature Selection:</strong> ${meta.fs}</span>`,
+    `<span>🔢 <strong>N Features:</strong> ${meta.nFeat}</span>`,
+  ].join('');
+
+  document.getElementById('shapContent').style.display = 'none';
+  document.getElementById('shapError').style.display   = 'none';
+  document.getElementById('shapLoading').style.display = '';
+
+  fetch(meta.file)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
+    .then(csv => {
+      document.getElementById('shapLoading').style.display = 'none';
+      document.getElementById('shapContent').style.display = '';
+      const rows = parseCSV(csv);
+      renderChart(rows, task);
+      renderTable(rows, task);
+    })
+    .catch(err => {
+      document.getElementById('shapLoading').style.display = 'none';
+      document.getElementById('shapError').style.display   = '';
+      document.getElementById('shapError').textContent     = `Could not load ${meta.file}: ${err}`;
+    });
+}
+
+// ── CSV parser ───────────────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const vals = line.split(',');
+    const obj  = {};
+    headers.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? ''; });
+    return obj;
+  }).sort((a, b) => parseFloat(b.mean_importance) - parseFloat(a.mean_importance))
+    .map((r, i) => ({ ...r, _rank: i + 1, _omicsCode: omicsCode(r.feature) }));
+}
+
+function omicsCode(feature) {
+  const m = feature.match(/\((\w)\)$/);
+  return m ? m[1] : '?';
+}
+
+function omicsBadgeInline(code) {
+  const o = OMICS_CODE[code] || { label: code, bg: '#e9ecef', border: '#adb5bd', color: '#495057' };
+  return `<span class="ob" style="background:${o.bg};border:1px solid ${o.border};color:${o.color}">${o.label}</span>`;
+}
+
+// ── Bar chart: top 20 by mean_importance ─────────────────────────────────────
+function renderChart(rows, task) {
+  const top    = rows.slice(0, 20);
+  const labels = top.map(r => r.feature);
+  const values = top.map(r => parseFloat(r.mean_importance));
+
+  // Colour bars by omics type
+  const bgColors = top.map(r => {
+    const o = OMICS_CODE[r._omicsCode];
+    return o ? o.bg.replace('var(--hi-rna)', '#fff3cd')
+                   .replace('var(--hi-methyl)', '#e8d5f5')
+                   .replace('var(--hi-mirna)', '#fce4ec') : '#cce5ff';
+  });
+  const borderColors = top.map(r => OMICS_CODE[r._omicsCode]?.border || '#adb5bd');
+
+  const chartTitle = `Top ${top.length} Features by Mean SHAP Importance — ${TASK_META[task].label}`;
+  document.getElementById('shapChartTitle').textContent = chartTitle;
+
+  if (shapChart) { shapChart.destroy(); shapChart = null; }
+
+  shapChart = new Chart(document.getElementById('shapBarChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Mean SHAP Importance',
+        data: values,
+        backgroundColor: bgColors,
+        borderColor: borderColors,
+        borderWidth: 1,
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => `  ${Number(c.raw).toFixed(4)}`,
+            title: t => t[0].label,
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Mean |SHAP| Importance', font: { size: 11 } },
+          ticks: { font: { size: 10 } },
+          grid: { color: 'rgba(0,0,0,0.06)' },
+        },
+        y: { ticks: { font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+// ── Table ────────────────────────────────────────────────────────────────────
+function renderTable(rows, task) {
+  const meta = TASK_META[task];
+
+  if (shapTbl) { shapTbl.destroy(); shapTbl = null; }
+
+  const columns = [
+    { title: '#',      field: '_rank',         sorter: 'number', hozAlign: 'center', width: 50 },
+    { title: 'Feature', field: 'feature',      sorter: 'string', width: 210,
+      formatter: c => `<span style="font-family:monospace">${c.getValue()}</span>` },
+    { title: 'Omics',  field: '_omicsCode',    sorter: 'string', width: 110,
+      formatter: c => omicsBadgeInline(c.getValue()) },
+    {
+      title: 'Mean Importance', field: 'mean_importance', sorter: 'num3dp',
+      hozAlign: 'right', width: 145,
+      formatter: c => {
+        const v = parseFloat(c.getValue());
+        const pct = Math.min(100, (v / rows[0].mean_importance) * 100);
+        return `<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+          <div style="width:60px;background:#e9ecef;border-radius:3px;height:8px;overflow:hidden">
+            <div style="width:${pct.toFixed(1)}%;background:var(--teal);height:100%"></div>
+          </div>
+          <span>${v.toFixed(4)}</span>
+        </div>`;
+      },
+    },
+  ];
+
+  // Add per-class columns for IC
+  if (meta.classes.length > 0) {
+    const classColors = {
+      CNV_HIGH: '#1a3a5c', CNV_LOW: '#1a8a9a', MSI: '#c8572a', POLE: '#388450',
+    };
+    meta.classes.forEach(cls => {
+      columns.splice(columns.length - 1, 0, {   // insert before Mean Importance
+        title: cls.replace('_', ' '),
+        field: `class_${cls}`,
+        sorter: 'num3dp',
+        hozAlign: 'right',
+        width: 100,
+        formatter: c => {
+          const v = parseFloat(c.getValue());
+          if (isNaN(v)) return '<span style="color:#aaa">—</span>';
+          const color = classColors[cls] || '#555';
+          return `<span style="color:${color};font-weight:500">${v.toFixed(4)}</span>`;
+        },
+      });
+    });
+  }
+
+  shapTbl = new Tabulator('#shapTable', {
+    data: rows,
+    layout: 'fitData',
+    pagination: 'local',
+    paginationSize: 25,
+    paginationSizeSelector: [25, 50, 100],
+    initialSort: [{ column: 'mean_importance', dir: 'desc' }],
+    rowFormatter(row) {
+      const code = row.getData()._omicsCode;
+      const el   = row.getElement();
+      el.style.background = '';
+      if (code === 'R') el.style.background = 'rgba(255,243,205,0.35)';
+      if (code === 'D') el.style.background = 'rgba(232,213,245,0.35)';
+      if (code === 'M') el.style.background = 'rgba(252,228,236,0.35)';
+    },
+    columns,
+  });
+}
+</script>
+</body>
+</html>
