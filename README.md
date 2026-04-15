@@ -64,7 +64,3 @@ python -m http.server 8000
 
 Opening `index.html` directly as a `file://` URL will cause the JSON/CSV data fetches to fail due to browser CORS restrictions. Use a local server instead.
 
-## Authors
-
-Naisarg Patel, Vijayachitra Modhukur, Andres Salumets
-Celvia CC · University of Tartu · Karolinska Institutet
